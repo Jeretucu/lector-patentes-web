@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#111827">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>Lector de Patentes</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0b1220; color:#e5e7eb; font-family:'Segoe UI',sans-serif; min-height:100vh; }
+  header { padding:10px 14px; }
+  h1 { font-size:1.15rem; margin-bottom:8px; } h1 span{ color:#4fc3f7; }
+  .selectors { display:flex; flex-wrap:wrap; gap:14px; align-items:center; }
+  .btn { padding:7px 14px; border:2px solid #2563eb; border-radius:20px; background:#0b1220;
+         color:#fff; font-size:.85rem; font-weight:600; cursor:pointer; }
+  .btn.primary { border-color:#16a34a; } .btn.primary.on { background:#16a34a; }
+  .layout { display:flex; gap:14px; flex-wrap:wrap; padding:0 14px 14px; }
+  .stage { flex:2; min-width:320px; position:relative; background:#000; border-radius:10px; overflow:hidden; }
+  #canvas { width:100%; display:block; max-height:78vh; object-fit:contain; background:#000; }
+  #video { display:none; }
+  #hud { position:absolute; top:8px; left:8px; right:8px; display:flex; justify-content:space-between;
+         color:#fff; font-size:13px; pointer-events:none; }
+  #fps { background:rgba(0,0,0,.6); padding:6px 10px; border-radius:8px; font-size:18px; font-weight:700; }
+  #fps b { color:#4ade80; }
+  #infobox { background:rgba(0,0,0,.6); padding:6px 10px; border-radius:8px; text-align:right; line-height:1.4; }
+  .panel { flex:1; min-width:240px; }
+  #status { font-size:.8rem; color:#9ca3af; margin:6px 0 10px; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#ef4444; margin-right:6px; }
+  .dot.on { background:#22c55e; }
+  .card { background:#1f2937; border-radius:8px; padding:12px 14px; margin-bottom:8px; border-left:6px solid #4fc3f7; }
+  .plate-text { font-size:1.8rem; font-weight:bold; letter-spacing:4px; }
+  .plate-conf { font-size:.78rem; color:#9ca3af; margin-top:4px; }
+  .empty { color:#9ca3af; font-style:italic; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🚗 Lector de <span>Patentes</span></h1>
+  <div class="selectors">
+    <button class="btn primary" id="startbtn">▶ Iniciar</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="stage">
+    <video id="video" playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="hud" style="display:none">
+      <div id="fps"><b>--</b> FPS</div>
+      <div id="infobox">backend: <span id="backend">--</span><br>inf: <span id="inftime">--</span> ms<br>det: <span id="ndet">0</span></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div id="status"><span class="dot" id="dot"></span><span id="statustext">Listo. Tocá Iniciar.</span></div>
+    <div id="detpanel" class="empty">Sin patentes detectadas</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+
+// ==== config modelo ====
+// YOLOv8n pre-entrenado (MKgoud/License-Plate-Recognizer, MIT). Placeholder hasta tener
+// el YOLOX propio entrenado con dataset de Roboflow: ese export usa otro formato de salida
+// (decodificado, [1,N,5+clases]) y va a necesitar otro postprocess() distinto a este.
+const MODEL_URL = "models/license_plate.onnx";
+const INPUT = 640, CONF = 0.35, NMS = 0.45;
+const CLASSES = ["single_number_plate", "double_number_plate"];
+
+// ==== elementos ====
+const video=$("video"), canvas=$("canvas"), ctx=canvas.getContext("2d");
+const pre=document.createElement("canvas"); pre.width=INPUT; pre.height=INPUT;
+const pctx=pre.getContext("2d",{willReadFrequently:true});
+
+let session=null, running=false;
+
+function setStatus(t){ $("statustext").textContent=t; }
+function updateBtn(on){ const b=$("startbtn"); b.textContent=on?"■ Detener":"▶ Iniciar"; b.classList.toggle("on",on); }
+
+$("startbtn").onclick=async()=>{
+  if(running){ stop(); return; }
+  await start();
+};
+
+async function ensureModel(){
+  if(session) return $("backend").textContent;
+  setStatus("Cargando modelo...");
+  let backend="wasm";
+  if(navigator.gpu){
+    try{ session=await ort.InferenceSession.create(MODEL_URL,{executionProviders:["webgpu"],graphOptimizationLevel:"all"}); backend="webgpu"; }
+    catch(e){ console.warn(e); }
+  }
+  if(!session){ session=await ort.InferenceSession.create(MODEL_URL,{executionProviders:["wasm"],graphOptimizationLevel:"all"}); backend="wasm"; }
+  $("backend").textContent=backend;
+  return backend;
+}
+
+async function start(){
+  try{
+    await ensureModel();
+    setStatus("Iniciando cámara...");
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}},audio:false});
+    video.srcObject=stream; await video.play();
+    canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+    running=true; updateBtn(true); $("hud").style.display="flex"; $("dot").classList.add("on");
+    acquireWakeLock();
+    setStatus("Procesando en el celular");
+    loop();
+  }catch(e){ setStatus("Error: "+e.message); running=false; updateBtn(false); }
+}
+function stop(){
+  running=false; updateBtn(false); $("dot").classList.remove("on");
+  if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
+}
+
+// ==== wake lock ====
+let wakeLock=null;
+async function acquireWakeLock(){ try{ if("wakeLock" in navigator){ wakeLock=await navigator.wakeLock.request("screen"); } }catch(e){} }
+document.addEventListener("visibilitychange",()=>{ if(running&&wakeLock&&document.visibilityState==="visible") acquireWakeLock(); });
+
+// ==== preprocesamiento (letterbox top-left, igual para cualquier modelo YOLO*) ====
+function preprocess(){
+  const vw=video.videoWidth,vh=video.videoHeight,r=Math.min(INPUT/vw,INPUT/vh);
+  const nw=Math.round(vw*r),nh=Math.round(vh*r);
+  pctx.fillStyle="rgb(114,114,114)"; pctx.fillRect(0,0,INPUT,INPUT); pctx.drawImage(video,0,0,nw,nh);
+  const data=pctx.getImageData(0,0,INPUT,INPUT).data, arr=new Float32Array(INPUT*INPUT*3), area=INPUT*INPUT;
+  for(let i=0;i<area;i++){ const j=i*4; arr[i]=data[j]/255; arr[area+i]=data[j+1]/255; arr[2*area+i]=data[j+2]/255; }
+  return {tensor:new ort.Tensor("float32",arr,[1,3,INPUT,INPUT]),r};
+}
+
+// ==== NMS ====
+function iou(a,b){ const x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),x2=Math.min(a[2],b[2]),y2=Math.min(a[3],b[3]);
+  const w=Math.max(0,x2-x1),h=Math.max(0,y2-y1),inter=w*h; return inter/((a[2]-a[0])*(a[3]-a[1])+(b[2]-b[0])*(b[3]-b[1])-inter); }
+function nms(boxes,scores,thr){ const idx=scores.map((s,i)=>i).sort((a,b)=>scores[b]-scores[a]),keep=[];
+  while(idx.length){ const c=idx.shift(); keep.push(c); for(let k=idx.length-1;k>=0;k--) if(iou(boxes[c],boxes[idx[k]])>thr) idx.splice(k,1); } return keep; }
+
+// ==== postprocesamiento — salida YOLOv8: [1, 4+clases, N] transpuesto, sin objectness ====
+function postprocess(out,r){
+  const d=out.data, dims=out.dims, nClasses=dims[1]-4, nAnchors=dims[2];
+  const boxes=[],scores=[],clsIds=[];
+  for(let i=0;i<nAnchors;i++){
+    let best=0,bv=d[(4)*nAnchors+i];
+    for(let c=1;c<nClasses;c++){ const v=d[(4+c)*nAnchors+i]; if(v>bv){bv=v;best=c;} }
+    if(bv<CONF) continue;
+    const cx=d[i],cy=d[nAnchors+i],w=d[2*nAnchors+i],h=d[3*nAnchors+i];
+    boxes.push([(cx-w/2)/r,(cy-h/2)/r,(cx+w/2)/r,(cy+h/2)/r]); scores.push(bv); clsIds.push(best);
+  }
+  const results=[];
+  for(const c of [...new Set(clsIds)]){
+    const gi=clsIds.map((v,i)=>i).filter(i=>clsIds[i]===c), gb=gi.map(i=>boxes[i]), gs=gi.map(i=>scores[i]);
+    for(const k of nms(gb,gs,NMS)) results.push({box:gb[k],cls:CLASSES[c],score:gs[k]});
+  }
+  return results;
+}
+
+function drawFrame(dets){
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  ctx.lineWidth=3; ctx.strokeStyle="#4fc3f7"; ctx.font="bold 18px sans-serif";
+  for(const d of dets){
+    const [x1,y1,x2,y2]=d.box;
+    ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+    const lbl=`Patente ${(d.score*100).toFixed(0)}%`;
+    const tw=ctx.measureText(lbl).width, ty=Math.max(y1-24,0);
+    ctx.fillStyle="#4fc3f7"; ctx.fillRect(x1-1,ty,tw+10,24);
+    ctx.fillStyle="#001018"; ctx.fillText(lbl,x1+4,ty+18);
+  }
+  $("ndet").textContent=dets.length;
+  renderPanel(dets);
+}
+function renderPanel(dets){
+  const el=$("detpanel");
+  if(!dets.length){ el.innerHTML='<div class="empty">Sin patentes detectadas</div>'; return; }
+  el.innerHTML=dets.map((d,i)=>`<div class="card"><div class="plate-text">Patente #${i+1}</div><div class="plate-conf">${d.cls} · ${(d.score*100).toFixed(0)}% confianza</div></div>`).join("");
+}
+
+let frames=0,lastT=performance.now();
+async function loop(){
+  if(!running) return;
+  const {tensor,r}=preprocess();
+  const t0=performance.now();
+  const out=await session.run({[session.inputNames[0]]:tensor});
+  const t1=performance.now();
+  drawFrame(postprocess(out[session.outputNames[0]],r));
+  $("inftime").textContent=(t1-t0).toFixed(0);
+  frames++; const now=performance.now();
+  if(now-lastT>=500){ $("fps").innerHTML=`<b>${(frames*1000/(now-lastT)).toFixed(1)}</b> FPS`; frames=0; lastT=now; }
+  requestAnimationFrame(loop);
+}
+
+if("serviceWorker" in navigator){ navigator.serviceWorker.register("sw.js").catch(()=>{}); }
+</script>
+</body>
+</html>
