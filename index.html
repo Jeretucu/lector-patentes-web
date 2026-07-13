@@ -273,28 +273,47 @@ function preprocessCrop(box){
   const w=Math.max(x2-x1,1),h=Math.max(y2-y1,1);
   const scale=Math.max(3,Math.round(100/h)), pad=15;
   ocrCanvas.width=w*scale+pad*2; ocrCanvas.height=h*scale+pad*2;
-  ocrCtx.fillStyle='white'; ocrCtx.fillRect(0,0,ocrCanvas.width,ocrCanvas.height);
+  ocrCtx.fillStyle='gray'; ocrCtx.fillRect(0,0,ocrCanvas.width,ocrCanvas.height);
   ocrCtx.drawImage(video,x1,y1,w,h,pad,pad,w*scale,h*scale);
+  // escala de grises + normalizar contraste (funciona para fondos claros Y oscuros)
   const img=ocrCtx.getImageData(0,0,ocrCanvas.width,ocrCanvas.height),d=img.data;
-  let sum=0;
-  for(let i=0;i<d.length;i+=4) sum+=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-  const mean=sum/(d.length/4);
-  for(let i=0;i<d.length;i+=4){ const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2],v=g<mean?0:255; d[i]=d[i+1]=d[i+2]=v; }
+  let minG=255,maxG=0;
+  for(let i=0;i<d.length;i+=4){
+    const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    if(g<minG) minG=g; if(g>maxG) maxG=g;
+  }
+  const range=Math.max(maxG-minG,1);
+  for(let i=0;i<d.length;i+=4){
+    const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    const v=Math.round((g-minG)/range*255);
+    d[i]=d[i+1]=d[i+2]=v;
+  }
   ocrCtx.putImageData(img,0,0);
-  return ocrCanvas;
+}
+
+function invertOcrCanvas(){
+  const img=ocrCtx.getImageData(0,0,ocrCanvas.width,ocrCanvas.height),d=img.data;
+  for(let i=0;i<d.length;i+=4){ d[i]=255-d[i]; d[i+1]=255-d[i+1]; d[i+2]=255-d[i+2]; }
+  ocrCtx.putImageData(img,0,0);
 }
 
 async function tryOCR(dets){
   if(!ocrWorker||ocrRunning||!dets.length) return;
   ocrRunning=true;
   try{
-    const {data:{text}}=await ocrWorker.recognize(preprocessCrop(dets[0].box));
-    const plate=extractPlate(text);
+    preprocessCrop(dets[0].box);
+    // intento 1: imagen normalizada (Mercosur blanca y patentes claras)
+    let {data:{text}}=await ocrWorker.recognize(ocrCanvas);
+    let plate=extractPlate(text);
+    // intento 2 (fallback): imagen invertida (patente negra vieja, texto blanco)
+    if(!plate){
+      invertOcrCanvas();
+      const {data:{text:t2}}=await ocrWorker.recognize(ocrCanvas);
+      plate=extractPlate(t2);
+    }
     if(plate && plate!==lastValidPlate){
       lastValidPlate=plate; currentPlate=plate;
       updateDetectPanel(plate);
-    } else if(!plate && lastValidPlate) {
-      // mantener ultima patente valida en pantalla mientras siga detectando algo
     }
   }catch(e){}
   ocrRunning=false;
