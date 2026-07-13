@@ -267,53 +267,98 @@ function postprocess(out,r){
   return res;
 }
 
-// ==== OCR del recorte ====
-function preprocessCrop(box){
+// ==== OCR: preprocesamiento ====
+
+// Dibuja el recorte upscaleado en ocrCanvas (gris de base)
+function drawCrop(box){
   const [x1,y1,x2,y2]=box.map(Math.round);
   const w=Math.max(x2-x1,1),h=Math.max(y2-y1,1);
   const scale=Math.max(3,Math.round(100/h)), pad=15;
   ocrCanvas.width=w*scale+pad*2; ocrCanvas.height=h*scale+pad*2;
   ocrCtx.fillStyle='gray'; ocrCtx.fillRect(0,0,ocrCanvas.width,ocrCanvas.height);
   ocrCtx.drawImage(video,x1,y1,w,h,pad,pad,w*scale,h*scale);
-  // escala de grises + normalizar contraste (funciona para fondos claros Y oscuros)
+}
+
+// Convierte a escala de grises in-place
+function toGray(d){
+  for(let i=0;i<d.length;i+=4){
+    const g=Math.round(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]);
+    d[i]=d[i+1]=d[i+2]=g;
+  }
+}
+
+// Estira el histograma al rango 0-255
+function normalize(d){
+  let mn=255,mx=0;
+  for(let i=0;i<d.length;i+=4){ if(d[i]<mn)mn=d[i]; if(d[i]>mx)mx=d[i]; }
+  const r=Math.max(mx-mn,1);
+  for(let i=0;i<d.length;i+=4){ const v=Math.round((d[i]-mn)/r*255); d[i]=d[i+1]=d[i+2]=v; }
+}
+
+// Invierte la imagen (para patente negra con texto blanco)
+function invert(d){
+  for(let i=0;i<d.length;i+=4){ d[i]=255-d[i]; d[i+1]=255-d[i+1]; d[i+2]=255-d[i+2]; }
+}
+
+// CLAHE simplificado: ecualización de histograma por tiles (contraste local adaptativo)
+function clahe(d,w,h,tileSize=32){
+  const tx=Math.ceil(w/tileSize),ty=Math.ceil(h/tileSize);
+  for(let row=0;row<ty;row++) for(let col=0;col<tx;col++){
+    const x0=col*tileSize,y0=row*tileSize,x1=Math.min(x0+tileSize,w),y1=Math.min(y0+tileSize,h);
+    const hist=new Uint32Array(256),n=(x1-x0)*(y1-y0);
+    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++) hist[d[(y*w+x)*4]]++;
+    const lut=new Uint8Array(256); let cum=0;
+    for(let i=0;i<256;i++){cum+=hist[i];lut[i]=Math.min(255,Math.round(cum/n*255));}
+    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
+      const idx=(y*w+x)*4; d[idx]=d[idx+1]=d[idx+2]=lut[d[idx]];
+    }
+  }
+}
+
+// Aplica una variante de preprocesamiento al ocrCanvas actual
+function applyVariant(variant){
   const img=ocrCtx.getImageData(0,0,ocrCanvas.width,ocrCanvas.height),d=img.data;
-  let minG=255,maxG=0;
-  for(let i=0;i<d.length;i+=4){
-    const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-    if(g<minG) minG=g; if(g>maxG) maxG=g;
-  }
-  const range=Math.max(maxG-minG,1);
-  for(let i=0;i<d.length;i+=4){
-    const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-    const v=Math.round((g-minG)/range*255);
-    d[i]=d[i+1]=d[i+2]=v;
-  }
+  toGray(d);
+  if(variant==='norm')         { normalize(d); }
+  if(variant==='norm-inv')     { normalize(d); invert(d); }
+  if(variant==='clahe')        { clahe(d,ocrCanvas.width,ocrCanvas.height); }
+  if(variant==='clahe-inv')    { clahe(d,ocrCanvas.width,ocrCanvas.height); invert(d); }
   ocrCtx.putImageData(img,0,0);
 }
 
-function invertOcrCanvas(){
-  const img=ocrCtx.getImageData(0,0,ocrCanvas.width,ocrCanvas.height),d=img.data;
-  for(let i=0;i<d.length;i+=4){ d[i]=255-d[i]; d[i+1]=255-d[i+1]; d[i+2]=255-d[i+2]; }
-  ocrCtx.putImageData(img,0,0);
+// ==== votacion: confirma una patente solo si aparece 3+ veces en los ultimos 6 reads ====
+const ocrVotes=[];
+const VOTE_WIN=6, VOTE_THR=3;
+
+function voteForPlate(plate){
+  ocrVotes.push(plate||'');
+  if(ocrVotes.length>VOTE_WIN) ocrVotes.shift();
+  const freq={};
+  for(const p of ocrVotes) if(p) freq[p]=(freq[p]||0)+1;
+  let best='',bestN=0;
+  for(const [p,n] of Object.entries(freq)) if(n>bestN){best=p;bestN=n;}
+  return bestN>=VOTE_THR ? best : '';
 }
+
+// ==== tryOCR: prueba hasta 4 variantes, para en la primera que matchea ====
+const VARIANTS=['norm','norm-inv','clahe','clahe-inv'];
 
 async function tryOCR(dets){
   if(!ocrWorker||ocrRunning||!dets.length) return;
   ocrRunning=true;
   try{
-    preprocessCrop(dets[0].box);
-    // intento 1: imagen normalizada (Mercosur blanca y patentes claras)
-    let {data:{text}}=await ocrWorker.recognize(ocrCanvas);
-    let plate=extractPlate(text);
-    // intento 2 (fallback): imagen invertida (patente negra vieja, texto blanco)
-    if(!plate){
-      invertOcrCanvas();
-      const {data:{text:t2}}=await ocrWorker.recognize(ocrCanvas);
-      plate=extractPlate(t2);
+    let found='';
+    for(const variant of VARIANTS){
+      drawCrop(dets[0].box);
+      applyVariant(variant);
+      const {data:{text}}=await ocrWorker.recognize(ocrCanvas);
+      found=extractPlate(text);
+      if(found) break;
     }
-    if(plate && plate!==lastValidPlate){
-      lastValidPlate=plate; currentPlate=plate;
-      updateDetectPanel(plate);
+    const confirmed=voteForPlate(found);
+    if(confirmed && confirmed!==currentPlate){
+      currentPlate=confirmed; lastValidPlate=confirmed;
+      updateDetectPanel(confirmed);
     }
   }catch(e){}
   ocrRunning=false;
