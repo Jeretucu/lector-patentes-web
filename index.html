@@ -119,7 +119,7 @@ h1 { font-size:1.1rem; } h1 span { color:#4fc3f7; }
 const $ = id => document.getElementById(id);
 
 // ==== modelo ====
-const MODEL_URL = "models/patentes_yolox_int8.onnx";
+const MODEL_URL = "models/license_plate.onnx";
 const INPUT = 640, CONF = 0.35, NMS = 0.45;
 const API_URL = "https://camaras-saas.vercel.app/api/cochera/event";
 
@@ -371,19 +371,23 @@ function iou(a,b){ const x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),x2=Math.m
 function nms(boxes,scores,thr){ const idx=scores.map((s,i)=>i).sort((a,b)=>scores[b]-scores[a]),keep=[];
   while(idx.length){ const c=idx.shift(); keep.push(c); for(let k=idx.length-1;k>=0;k--) if(iou(boxes[c],boxes[idx[k]])>thr) idx.splice(k,1); } return keep; }
 
-// ==== postprocess YOLOX (output: [1, 8400, 7] = x1,y1,x2,y2,obj,cls0,cls1) ====
+// ==== postprocess YOLOv8 (output: [1, 4+cls, anchors]) ====
 function postprocess(out,r){
-  const d=out.data,dims=out.dims;
-  const nA=dims[1],nF=dims[2],nCls=nF-5;
-  const boxes=[],scores=[];
+  const d=out.data,dims=out.dims,nC=dims[1]-4,nA=dims[2];
+  const boxes=[],scores=[],cls=[];
   for(let i=0;i<nA;i++){
-    const base=i*nF;
-    const obj=d[base+4]; if(obj<CONF) continue;
-    let maxCls=0; for(let c=0;c<nCls;c++) if(d[base+5+c]>maxCls) maxCls=d[base+5+c];
-    const score=obj*maxCls; if(score<CONF) continue;
-    boxes.push([d[base]/r,d[base+1]/r,d[base+2]/r,d[base+3]/r]); scores.push(score);
+    let b=0,bv=d[4*nA+i];
+    for(let c=1;c<nC;c++){ const v=d[(4+c)*nA+i]; if(v>bv){bv=v;b=c;} }
+    if(bv<CONF) continue;
+    const cx=d[i],cy=d[nA+i],w=d[2*nA+i],h=d[3*nA+i];
+    boxes.push([(cx-w/2)/r,(cy-h/2)/r,(cx+w/2)/r,(cy+h/2)/r]); scores.push(bv); cls.push(b);
   }
-  return nms(boxes,scores,NMS).map(i=>({box:boxes[i],score:scores[i]}));
+  const res=[];
+  for(const c of [...new Set(cls)]){
+    const gi=cls.map((v,i)=>i).filter(i=>cls[i]===c),gb=gi.map(i=>boxes[i]),gs=gi.map(i=>scores[i]);
+    for(const k of nms(gb,gs,NMS)) res.push({box:gb[k],score:gs[k]});
+  }
+  return res;
 }
 
 // ==== OCR: preprocesamiento ====
