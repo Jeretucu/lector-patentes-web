@@ -40,6 +40,27 @@ h1 { font-size:1.1rem; } h1 span { color:#4fc3f7; }
 #btn-salida  { background:#dc2626; color:#fff; }
 .actions button:disabled { opacity:.35; cursor:default; }
 
+/* ---- config panel ---- */
+#cfg-toggle { background:none; border:none; color:#6b7280; font-size:1.2rem; cursor:pointer; padding:4px 8px; }
+#cfg-toggle:hover { color:#e5e7eb; }
+.api-dot { width:7px; height:7px; border-radius:50%; background:#22c55e; display:inline-block; margin-right:5px; }
+.api-dot.off { background:#374151; }
+#cfg-panel { background:#111827; border-bottom:1px solid #1f2937; padding:10px 14px;
+             display:flex; gap:8px; align-items:center; }
+#cfg-panel input { flex:1; background:#1f2937; border:1px solid #374151; border-radius:8px;
+                   padding:7px 10px; color:#e5e7eb; font-size:.8rem; font-family:monospace; }
+#cfg-panel button { padding:7px 12px; border:none; border-radius:8px; background:#2563eb;
+                    color:#fff; font-size:.8rem; font-weight:600; cursor:pointer; white-space:nowrap; }
+
+/* ---- toast ---- */
+#toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+         background:#1f2937; border:1px solid #374151; border-radius:12px;
+         padding:10px 18px; font-size:.9rem; font-weight:600; color:#fff;
+         opacity:0; transition:opacity .3s; pointer-events:none; z-index:99; text-align:center; }
+#toast.show { opacity:1; }
+#toast.ok   { border-color:#22c55e; color:#4ade80; }
+#toast.err  { border-color:#dc2626; color:#f87171; }
+
 /* ---- historial ---- */
 .history-header { padding:10px 14px 6px; display:flex; justify-content:space-between; align-items:center; }
 .history-header h2 { font-size:.9rem; color:#9ca3af; }
@@ -59,8 +80,17 @@ h1 { font-size:1.1rem; } h1 span { color:#4fc3f7; }
 <body>
 <header>
   <h1>🅿️ <span>Cochera</span></h1>
-  <button id="startbtn">▶ Iniciar</button>
+  <div style="display:flex;align-items:center;gap:8px;">
+    <span id="api-dot" class="api-dot off" title="API no configurada"></span>
+    <button id="cfg-toggle" title="Configurar API Key">⚙</button>
+    <button id="startbtn">▶ Iniciar</button>
+  </div>
 </header>
+<div id="cfg-panel" style="display:none;">
+  <input id="apikey-input" type="password" placeholder="API Key (Configuración del dashboard)" />
+  <button id="cfg-save">Guardar</button>
+</div>
+<div id="toast"></div>
 
 <div class="stage">
   <video id="video" playsinline muted></video>
@@ -92,6 +122,7 @@ const $ = id => document.getElementById(id);
 const MODEL_URL = "models/license_plate.onnx";
 const INPUT = 640, CONF = 0.35, NMS = 0.45;
 const CLASSES = ["single_number_plate", "double_number_plate"];
+const API_URL = "https://camaras-saas.vercel.app/api/cochera/event";
 
 // ==== patrones argentinos ====
 const PLATE_RE = [/[A-Z]{2}[0-9]{3}[A-Z]{2}/, /[A-Z]{3}[0-9]{3}/];
@@ -99,6 +130,60 @@ function extractPlate(raw) {
   const t = raw.replace(/[^A-Z0-9]/g, '').toUpperCase();
   for (const p of PLATE_RE) { const m = p.exec(t); if (m) return m[0]; }
   return '';
+}
+
+// ==== API Key ====
+let apiKey = localStorage.getItem('cochera_api_key') || '';
+function updateApiDot() {
+  const dot = $('api-dot');
+  if (apiKey) { dot.classList.remove('off'); dot.title = 'API conectada'; }
+  else         { dot.classList.add('off');    dot.title = 'API no configurada'; }
+}
+updateApiDot();
+
+$('cfg-toggle').onclick = () => {
+  const p = $('cfg-panel');
+  p.style.display = p.style.display === 'none' ? 'flex' : 'none';
+  if (p.style.display === 'flex') { $('apikey-input').value = apiKey; $('apikey-input').focus(); }
+};
+$('cfg-save').onclick = () => {
+  apiKey = $('apikey-input').value.trim();
+  localStorage.setItem('cochera_api_key', apiKey);
+  $('cfg-panel').style.display = 'none';
+  updateApiDot();
+  showToast(apiKey ? '✓ API Key guardada' : 'API Key borrada', apiKey ? 'ok' : '');
+};
+
+// ==== Toast ====
+let toastTimer;
+function showToast(msg, type='') {
+  const t = $('toast');
+  t.textContent = msg; t.className = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ''; }, 3000);
+}
+
+// ==== API call ====
+function getFrameB64() {
+  try {
+    const tmp = document.createElement('canvas');
+    tmp.width = canvas.width; tmp.height = canvas.height;
+    tmp.getContext('2d').drawImage(canvas, 0, 0);
+    return tmp.toDataURL('image/jpeg', 0.8);
+  } catch(e) { return null; }
+}
+
+async function callAPI(plate) {
+  if (!apiKey) return null;
+  const image = getFrameB64();
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, plate, image }),
+    });
+    return await res.json();
+  } catch(e) { return { error: 'Sin conexión' }; }
 }
 
 // ==== estado ====
@@ -120,17 +205,36 @@ function saveRecords() { localStorage.setItem('cochera_records', JSON.stringify(
 
 function getOpen(plate) { return records.find(r => r.plate===plate && !r.exit); }
 
-function registerEntry(plate) {
-  if (getOpen(plate)) { alert(`${plate} ya tiene una entrada abierta.`); return; }
+async function registerEntry(plate) {
+  if (getOpen(plate)) { showToast(`${plate} ya está adentro`, 'err'); return; }
+  // Local primero
   records.unshift({ plate, entry: Date.now(), exit: null });
-  saveRecords(); renderHistory();
+  saveRecords(); renderHistory(); updateDetectPanel(plate);
+  // API
+  if (apiKey) {
+    const resp = await callAPI(plate);
+    if (resp?.event === 'entry') showToast(`⬆ Entrada: ${plate}`, 'ok');
+    else if (resp?.error)        showToast('Error API: ' + resp.error, 'err');
+  } else {
+    showToast(`⬆ Entrada: ${plate} (sin API)`, '');
+  }
 }
 
-function registerExit(plate) {
+async function registerExit(plate) {
   const rec = getOpen(plate);
-  if (!rec) { alert(`No hay entrada registrada para ${plate}.`); return; }
+  if (!rec) { showToast(`No hay entrada abierta para ${plate}`, 'err'); return; }
   rec.exit = Date.now();
-  saveRecords(); renderHistory();
+  saveRecords(); renderHistory(); updateDetectPanel(plate);
+  // API
+  if (apiKey) {
+    const resp = await callAPI(plate);
+    if (resp?.event === 'exit') {
+      const dur = resp.duration_secs ? fmtDur(resp.duration_secs * 1000) : '';
+      showToast(`⬇ Salida: ${plate}${dur ? ' · ' + dur : ''}`, 'ok');
+    } else if (resp?.error) showToast('Error API: ' + resp.error, 'err');
+  } else {
+    showToast(`⬇ Salida: ${plate} (sin API)`, '');
+  }
 }
 
 function fmtTime(ts) {
@@ -181,8 +285,8 @@ function updateDetectPanel(plate) {
   }
 }
 
-$("btn-entrada").onclick=()=>{ if(currentPlate){ registerEntry(currentPlate); updateDetectPanel(currentPlate); } };
-$("btn-salida").onclick=()=>{ if(currentPlate){ registerExit(currentPlate); updateDetectPanel(currentPlate); } };
+$("btn-entrada").onclick=async()=>{ if(currentPlate) await registerEntry(currentPlate); };
+$("btn-salida").onclick=async()=>{ if(currentPlate) await registerExit(currentPlate); };
 $("btn-clear").onclick=()=>{
   if(confirm('¿Borrar todo el historial?')){ records=[]; saveRecords(); renderHistory(); }
 };
