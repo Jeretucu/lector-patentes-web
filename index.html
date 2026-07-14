@@ -121,15 +121,34 @@ const $ = id => document.getElementById(id);
 // ==== modelo ====
 const MODEL_URL = "models/license_plate.onnx";
 const INPUT = 640, CONF = 0.35, NMS = 0.45;
-const CLASSES = ["single_number_plate", "double_number_plate"];
 const API_URL = "https://camaras-saas.vercel.app/api/cochera/event";
 
 // ==== patrones argentinos ====
-const PLATE_RE = [/[A-Z]{2}[0-9]{3}[A-Z]{2}/, /[A-Z]{3}[0-9]{3}/];
+// Confusion OCR: letras que parecen números y viceversa
+const L2D = {O:'0',I:'1',B:'8',S:'5',G:'6',Z:'2',T:'7',A:'4'};
+const D2L = {'0':'O','1':'I','8':'B','5':'S','6':'G','2':'Z','7':'T','4':'A'};
+
+function fixChar(c, wantLetter) {
+  if (wantLetter) return (/[A-Z]/.test(c) ? c : (D2L[c] || c));
+  else            return (/[0-9]/.test(c) ? c : (L2D[c] || c));
+}
+
 function extractPlate(raw) {
   const t = raw.replace(/[^A-Z0-9]/g, '').toUpperCase();
-  for (const p of PLATE_RE) { const m = p.exec(t); if (m) return m[0]; }
-  return '';
+  if (t.length < 5 || t.length > 8) return '';
+
+  // Mercosur AA000AA (7 chars)
+  if (t.length === 7) {
+    const p = [true,true,false,false,false,true,true];
+    return p.map((isL, i) => fixChar(t[i], isL)).join('');
+  }
+  // Viejo AAA000 (6 chars)
+  if (t.length === 6) {
+    const p = [true,true,true,false,false,false];
+    return p.map((isL, i) => fixChar(t[i], isL)).join('');
+  }
+  // 5 u 8 chars: intentar igual
+  return t;
 }
 
 // ==== API Key ====
@@ -377,7 +396,7 @@ function postprocess(out,r){
 function drawCrop(box){
   const [x1,y1,x2,y2]=box.map(Math.round);
   const w=Math.max(x2-x1,1),h=Math.max(y2-y1,1);
-  const scale=Math.max(3,Math.round(100/h)), pad=15;
+  const scale=Math.max(5,Math.round(140/h)), pad=20;
   ocrCanvas.width=w*scale+pad*2; ocrCanvas.height=h*scale+pad*2;
   ocrCtx.fillStyle='gray'; ocrCtx.fillRect(0,0,ocrCanvas.width,ocrCanvas.height);
   ocrCtx.drawImage(video,x1,y1,w,h,pad,pad,w*scale,h*scale);
