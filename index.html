@@ -152,7 +152,8 @@ function extractPlate(raw) {
 }
 
 // ==== API Key ====
-let apiKey = localStorage.getItem('cochera_api_key') || '';
+const DEFAULT_API_KEY = '86f0ff58-358c-4063-99c8-d2c224e14192';
+let apiKey = localStorage.getItem('cochera_api_key') || DEFAULT_API_KEY;
 function updateApiDot() {
   const dot = $('api-dot');
   if (apiKey) { dot.classList.remove('off'); dot.title = 'API conectada'; }
