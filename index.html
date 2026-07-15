@@ -216,6 +216,7 @@ const ocrCtx=ocrCanvas.getContext("2d",{willReadFrequently:true});
 let session=null, running=false;
 let ocrWorker=null, ocrRunning=false;
 let currentPlate='', lastValidPlate='';
+let lastOcrRaw='';
 
 // ==== cochera: persistencia ====
 let records = JSON.parse(localStorage.getItem('cochera_records') || '[]');
@@ -476,15 +477,13 @@ async function tryOCR(dets){
       drawCrop(dets[0].box);
       applyVariant(variant);
       const {data:{text}}=await ocrWorker.recognize(ocrCanvas);
+      // Guarda raw para debug en HUD
+      const raw=text.replace(/[^A-Z0-9]/g,'').toUpperCase();
+      if(raw) lastOcrRaw=raw;
       found=extractPlate(text);
       if(found) break;
     }
     const confirmed=voteForPlate(found);
-    // Muestra en HUD lo que OCR lee (debug)
-    const hudEl=$("hud");
-    const hudBase=hudEl.dataset.base||hudEl.textContent;
-    hudEl.dataset.base=hudBase.split('|')[0].trim();
-    hudEl.textContent=hudEl.dataset.base+(found?` | OCR: ${found}`:'');
     if(confirmed && confirmed!==currentPlate){
       currentPlate=confirmed; lastValidPlate=confirmed;
       updateDetectPanel(confirmed);
@@ -523,7 +522,7 @@ async function loop(){
   frames++; const now=performance.now();
   if(now-lastT>=500){
     const fps=(frames*1000/(now-lastT)).toFixed(1);
-    $("hud").textContent=`${fps} FPS · ${inf}ms · ${dets.length} det.`;
+    $("hud").textContent=`${fps} FPS · ${inf}ms · ${dets.length} det.${lastOcrRaw?' | raw:'+lastOcrRaw:''}`;
     frames=0; lastT=now;
   }
   requestAnimationFrame(loop);
