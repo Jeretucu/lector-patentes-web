@@ -450,9 +450,9 @@ function applyVariant(variant){
   ocrCtx.putImageData(img,0,0);
 }
 
-// ==== votacion: confirma una patente solo si aparece 3+ veces en los ultimos 6 reads ====
+// ==== votacion ====
 const ocrVotes=[];
-const VOTE_WIN=6, VOTE_THR=3;
+const VOTE_WIN=4, VOTE_THR=2;
 
 function voteForPlate(plate){
   ocrVotes.push(plate||'');
@@ -480,6 +480,11 @@ async function tryOCR(dets){
       if(found) break;
     }
     const confirmed=voteForPlate(found);
+    // Muestra en HUD lo que OCR lee (debug)
+    const hudEl=$("hud");
+    const hudBase=hudEl.dataset.base||hudEl.textContent;
+    hudEl.dataset.base=hudBase.split('|')[0].trim();
+    hudEl.textContent=hudEl.dataset.base+(found?` | OCR: ${found}`:'');
     if(confirmed && confirmed!==currentPlate){
       currentPlate=confirmed; lastValidPlate=confirmed;
       updateDetectPanel(confirmed);
