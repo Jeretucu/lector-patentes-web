@@ -328,7 +328,7 @@ async function ensureOCR(){
   if(ocrWorker) return;
   $("hud").textContent='Cargando OCR...';
   ocrWorker=await Tesseract.createWorker('eng');
-  await ocrWorker.setParameters({ tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', tessedit_pageseg_mode:'7' });
+  await ocrWorker.setParameters({ tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', tessedit_pageseg_mode:'8' });
 }
 
 $("startbtn").onclick=async()=>{
@@ -394,14 +394,17 @@ function postprocess(out,r){
 
 // ==== OCR: preprocesamiento ====
 
-// Dibuja el recorte upscaleado en ocrCanvas (gris de base)
+// Dibuja el recorte upscaleado en ocrCanvas.
+// Saltea el 35% superior (encabezado "REPÚBLICA ARGENTINA") y toma solo la zona del número.
 function drawCrop(box){
   const [x1,y1,x2,y2]=box.map(Math.round);
   const w=Math.max(x2-x1,1),h=Math.max(y2-y1,1);
-  const scale=Math.max(5,Math.round(140/h)), pad=20;
-  ocrCanvas.width=w*scale+pad*2; ocrCanvas.height=h*scale+pad*2;
+  const yNum=Math.round(y1+h*0.35);   // inicio de la zona del número
+  const hNum=Math.max(y2-yNum,1);     // alto de esa zona
+  const scale=Math.max(5,Math.round(80/hNum)), pad=16;
+  ocrCanvas.width=w*scale+pad*2; ocrCanvas.height=hNum*scale+pad*2;
   ocrCtx.fillStyle='gray'; ocrCtx.fillRect(0,0,ocrCanvas.width,ocrCanvas.height);
-  ocrCtx.drawImage(video,x1,y1,w,h,pad,pad,w*scale,h*scale);
+  ocrCtx.drawImage(video,x1,yNum,w,hNum,pad,pad,w*scale,hNum*scale);
 }
 
 // Convierte a escala de grises in-place
