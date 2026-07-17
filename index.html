@@ -376,11 +376,12 @@ async function tryServerOCR(dets){
     const w=Math.max(x2-x1,1), h=Math.max(y2-y1,1);
     const yNum=Math.round(y1+h*0.35);
     const hNum=Math.max(y2-yNum,1);
-    // Mandar el recorte sin upscalear — el servidor lo escala según necesite
+    // 2x upscale + PNG sin pérdida para mejor OCR
+    const scale=2;
     const tmp=document.createElement('canvas');
-    tmp.width=w; tmp.height=hNum;
-    tmp.getContext('2d').drawImage(video,x1,yNum,w,hNum,0,0,w,hNum);
-    const b64=tmp.toDataURL('image/jpeg',0.95);
+    tmp.width=w*scale; tmp.height=hNum*scale;
+    tmp.getContext('2d').drawImage(video,x1,yNum,w,hNum,0,0,w*scale,hNum*scale);
+    const b64=tmp.toDataURL('image/png');
 
     const res=await fetch(serverUrl+'/ocr',{
       method:'POST',
