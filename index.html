@@ -154,7 +154,7 @@ const DEFAULT_SERVER = 'https://okay-clay-thus-continuous.trycloudflare.com';
 let serverUrl = localStorage.getItem('cochera_server') || DEFAULT_SERVER;
 let apiKey = localStorage.getItem('cochera_api_key') || '86f0ff58-358c-4063-99c8-d2c224e14192';
 let orKey = localStorage.getItem('cochera_or_key') || '';
-let orModel = localStorage.getItem('cochera_or_model') || '';
+let orModel = localStorage.getItem('cochera_or_model') || 'google/gemini-flash-1.5-8b';
 
 // ==== API dot ====
 function updateApiDot() {
@@ -432,11 +432,10 @@ async function tryServerOCR(dets){
     tc.drawImage(video,sx,sy,sw,sh,0,0,sw*scale,sh*scale);
     const b64=tmp.toDataURL('image/png');
 
-    const useLLM = orModel && orKey;
+    const useLLM = !!orModel;
     const endpoint = useLLM ? serverUrl+'/ocr-llm' : serverUrl+'/ocr';
-    const body = useLLM
-      ? {image:b64, model:orModel, api_key:orKey}
-      : {image:b64};
+    // La key vive en el servidor, el browser solo manda el modelo
+    const body = useLLM ? {image:b64, model:orModel} : {image:b64};
     const res=await fetch(endpoint,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
