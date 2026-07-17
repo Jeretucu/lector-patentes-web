@@ -220,7 +220,7 @@ async function registerEntry(plate) {
   if (apiKey) {
     const resp = await callAPI(plate);
     if (resp?.event === 'entry') showToast(`⬆ Entrada: ${plate}`, 'ok');
-    else if (resp?.error)        showToast('Error API: ' + resp.error, 'err');
+    else if (resp?.error)        showToast('Error: ' + (resp.detail || resp.error), 'err');
   } else { showToast(`⬆ Entrada: ${plate} (sin API)`, ''); }
 }
 
@@ -234,7 +234,7 @@ async function registerExit(plate) {
     if (resp?.event === 'exit') {
       const dur = resp.duration_secs ? fmtDur(resp.duration_secs * 1000) : '';
       showToast(`⬇ Salida: ${plate}${dur ? ' · ' + dur : ''}`, 'ok');
-    } else if (resp?.error) showToast('Error API: ' + resp.error, 'err');
+    } else if (resp?.error) showToast('Error: ' + (resp.detail || resp.error), 'err');
   } else { showToast(`⬇ Salida: ${plate} (sin API)`, ''); }
 }
 
