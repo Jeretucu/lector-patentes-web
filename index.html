@@ -152,10 +152,26 @@ const INPUT = 640, CONF = 0.35, NMS = 0.45;
 const API_URL = "https://camaras-saas.vercel.app/api/cochera/event";
 const DEFAULT_SERVER = 'https://makers-disturbed-acre-distribute.trycloudflare.com';
 
-let serverUrl = localStorage.getItem('cochera_server') || DEFAULT_SERVER;
+// Si la URL guardada es un túnel viejo de Cloudflare, reemplazar con el actual
+const OLD_TUNNELS = ['okay-clay-thus-continuous.trycloudflare.com'];
+let _savedServer = localStorage.getItem('cochera_server');
+if (_savedServer && OLD_TUNNELS.some(t => _savedServer.includes(t))) {
+  _savedServer = null;
+  localStorage.removeItem('cochera_server');
+}
+let serverUrl = _savedServer || DEFAULT_SERVER;
+
+// Si el modelo guardado es uno que ya no existe en OpenRouter, usar el default
+const OLD_MODELS = ['google/gemini-flash-1.5-8b', 'google/gemini-2.0-flash-001'];
+let _savedModel = localStorage.getItem('cochera_or_model');
+if (_savedModel && OLD_MODELS.includes(_savedModel)) {
+  _savedModel = null;
+  localStorage.removeItem('cochera_or_model');
+}
+
 let apiKey = localStorage.getItem('cochera_api_key') || '86f0ff58-358c-4063-99c8-d2c224e14192';
 let orKey = localStorage.getItem('cochera_or_key') || '';
-let orModel = localStorage.getItem('cochera_or_model') || 'google/gemini-3.1-flash-image';
+let orModel = _savedModel || 'google/gemini-3.1-flash-image';
 
 // ==== API dot ====
 function updateApiDot() {
