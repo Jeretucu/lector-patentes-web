@@ -376,10 +376,10 @@ async function tryServerOCR(dets){
     const w=Math.max(x2-x1,1), h=Math.max(y2-y1,1);
     const yNum=Math.round(y1+h*0.35);
     const hNum=Math.max(y2-yNum,1);
-    // Padding 15% horizontal para que chars del borde tengan contexto
-    const padX=Math.round(w*0.15), padY=Math.round(hNum*0.08);
-    const sx=Math.max(0,x1-padX), sy=Math.max(0,yNum-padY);
-    const sw=Math.min(canvas.width-sx, w+padX*2), sh=Math.min(canvas.height-sy, hNum+padY*2);
+    // El bbox de YOLO suele cortar el último char → más padding a la derecha
+    const padL=Math.round(w*0.08), padR=Math.round(w*0.40), padY=Math.round(hNum*0.08);
+    const sx=Math.max(0,x1-padL), sy=Math.max(0,yNum-padY);
+    const sw=Math.min(canvas.width-sx, w+padL+padR), sh=Math.min(canvas.height-sy, hNum+padY*2);
     const scale=2;
     const tmp=document.createElement('canvas');
     tmp.width=sw*scale; tmp.height=sh*scale;
