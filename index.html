@@ -108,8 +108,9 @@ h1 { font-size:1.1rem; } h1 span { color:#4fc3f7; }
     <label>Modelo LLM</label>
     <select id="or-model-select" style="flex:1;background:#1f2937;border:1px solid #374151;border-radius:8px;padding:7px 10px;color:#e5e7eb;font-size:.8rem;">
       <option value="">— EasyOCR (local) —</option>
-      <option value="google/gemini-flash-1.5-8b">Gemini Flash 1.5 8B (muy barato)</option>
-      <option value="google/gemini-2.0-flash-001">Gemini Flash 2.0</option>
+      <option value="google/gemini-3.1-flash-image">Gemini 3.1 Flash Image</option>
+      <option value="google/gemini-3.1-flash-lite-image">Gemini 3.1 Flash Lite Image (barato)</option>
+      <option value="google/gemini-3.5-flash">Gemini 3.5 Flash</option>
       <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5</option>
       <option value="openai/gpt-4o-mini">GPT-4o mini</option>
       <option value="meta-llama/llama-3.2-11b-vision-instruct">Llama 3.2 11B Vision (gratis)</option>
@@ -149,12 +150,12 @@ const $ = id => document.getElementById(id);
 const MODEL_URL = "models/license_plate.onnx";
 const INPUT = 640, CONF = 0.35, NMS = 0.45;
 const API_URL = "https://camaras-saas.vercel.app/api/cochera/event";
-const DEFAULT_SERVER = 'https://okay-clay-thus-continuous.trycloudflare.com';
+const DEFAULT_SERVER = 'https://makers-disturbed-acre-distribute.trycloudflare.com';
 
 let serverUrl = localStorage.getItem('cochera_server') || DEFAULT_SERVER;
 let apiKey = localStorage.getItem('cochera_api_key') || '86f0ff58-358c-4063-99c8-d2c224e14192';
 let orKey = localStorage.getItem('cochera_or_key') || '';
-let orModel = localStorage.getItem('cochera_or_model') || 'google/gemini-flash-1.5-8b';
+let orModel = localStorage.getItem('cochera_or_model') || 'google/gemini-3.1-flash-image';
 
 // ==== API dot ====
 function updateApiDot() {
