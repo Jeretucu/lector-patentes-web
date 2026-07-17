@@ -360,11 +360,23 @@ const VOTE_WIN=4, VOTE_THR=2;
 function voteForPlate(plate){
   ocrVotes.push(plate||'');
   if(ocrVotes.length>VOTE_WIN) ocrVotes.shift();
-  const freq={};
-  for(const p of ocrVotes) if(p) freq[p]=(freq[p]||0)+1;
-  let best='',bestN=0;
-  for(const [p,n] of Object.entries(freq)) if(n>bestN){best=p;bestN=n;}
-  return bestN>=VOTE_THR ? best : '';
+  // Votar por posicion: prefijo (0-4) requiere VOTE_THR, sufijo (5-6) solo 1 voto
+  for(const len of [7,6]){
+    const valid=ocrVotes.filter(p=>p&&p.length===len);
+    if(valid.length<VOTE_THR) continue;
+    let result='', ok=true;
+    for(let i=0;i<len;i++){
+      const freq={};
+      for(const p of valid) freq[p[i]]=(freq[p[i]]||0)+1;
+      let best='',bestN=0;
+      for(const [c,n] of Object.entries(freq)) if(n>bestN){best=c;bestN=n;}
+      const thr=i<len-2?VOTE_THR:1; // prefijo estricto, sufijo rapido
+      if(bestN<thr){ok=false;break;}
+      result+=best;
+    }
+    if(ok) return result;
+  }
+  return '';
 }
 
 // ==== Server OCR ====
@@ -419,7 +431,11 @@ function drawFrame(dets){
       ctx.fillStyle="#000"; ctx.fillText(lbl,x1+5,ty+18);
     }
   }
-  if(!dets.length && lastValidPlate){ lastValidPlate=''; currentPlate=''; updateDetectPanel(''); }
+  if(!dets.length && lastValidPlate){
+    lastValidPlate=''; currentPlate='';
+    ocrVotes.length=0; // limpiar votos al perder la deteccion
+    updateDetectPanel('');
+  }
 }
 
 // ==== loop ====
