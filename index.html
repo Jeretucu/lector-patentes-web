@@ -46,11 +46,13 @@ h1 { font-size:1.1rem; } h1 span { color:#4fc3f7; }
 .api-dot { width:7px; height:7px; border-radius:50%; background:#22c55e; display:inline-block; margin-right:5px; }
 .api-dot.off { background:#374151; }
 #cfg-panel { background:#111827; border-bottom:1px solid #1f2937; padding:10px 14px;
-             display:flex; gap:8px; align-items:center; }
-#cfg-panel input { flex:1; background:#1f2937; border:1px solid #374151; border-radius:8px;
-                   padding:7px 10px; color:#e5e7eb; font-size:.8rem; font-family:monospace; }
-#cfg-panel button { padding:7px 12px; border:none; border-radius:8px; background:#2563eb;
-                    color:#fff; font-size:.8rem; font-weight:600; cursor:pointer; white-space:nowrap; }
+             display:flex; flex-direction:column; gap:7px; }
+.cfg-row { display:flex; gap:8px; align-items:center; }
+.cfg-row label { font-size:.72rem; color:#9ca3af; white-space:nowrap; min-width:56px; }
+.cfg-row input { flex:1; background:#1f2937; border:1px solid #374151; border-radius:8px;
+                 padding:7px 10px; color:#e5e7eb; font-size:.8rem; font-family:monospace; }
+.cfg-row button { padding:7px 12px; border:none; border-radius:8px; background:#2563eb;
+                  color:#fff; font-size:.8rem; font-weight:600; cursor:pointer; white-space:nowrap; }
 
 /* ---- toast ---- */
 #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
@@ -87,8 +89,16 @@ h1 { font-size:1.1rem; } h1 span { color:#4fc3f7; }
   </div>
 </header>
 <div id="cfg-panel" style="display:none;">
-  <input id="apikey-input" type="password" placeholder="API Key (Configuración del dashboard)" />
-  <button id="cfg-save">Guardar</button>
+  <div class="cfg-row">
+    <label>Servidor</label>
+    <input id="server-input" type="text" placeholder="URL tunnel (https://...trycloudflare.com)" />
+    <button id="server-save">OK</button>
+  </div>
+  <div class="cfg-row">
+    <label>API Key</label>
+    <input id="apikey-input" type="password" placeholder="API Key del dashboard" />
+    <button id="cfg-save">OK</button>
+  </div>
 </div>
 <div id="toast"></div>
 
@@ -114,46 +124,19 @@ h1 { font-size:1.1rem; } h1 span { color:#4fc3f7; }
 <div id="history"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 
-// ==== modelo ====
+// ==== config ====
 const MODEL_URL = "models/license_plate.onnx";
 const INPUT = 640, CONF = 0.35, NMS = 0.45;
 const API_URL = "https://camaras-saas.vercel.app/api/cochera/event";
+const DEFAULT_SERVER = 'https://okay-clay-thus-continuous.trycloudflare.com';
 
-// ==== patrones argentinos ====
-// Confusion OCR: letras que parecen números y viceversa
-const L2D = {O:'0',I:'1',B:'8',S:'5',G:'6',Z:'2',T:'7',A:'4'};
-const D2L = {'0':'O','1':'I','8':'B','5':'S','6':'G','2':'Z','7':'T','4':'A'};
+let serverUrl = localStorage.getItem('cochera_server') || DEFAULT_SERVER;
+let apiKey = localStorage.getItem('cochera_api_key') || '86f0ff58-358c-4063-99c8-d2c224e14192';
 
-function fixChar(c, wantLetter) {
-  if (wantLetter) return (/[A-Z]/.test(c) ? c : (D2L[c] || c));
-  else            return (/[0-9]/.test(c) ? c : (L2D[c] || c));
-}
-
-function extractPlate(raw) {
-  const t = raw.replace(/[^A-Z0-9]/g, '').toUpperCase();
-  if (t.length < 5 || t.length > 8) return '';
-
-  // Mercosur AA000AA (7 chars)
-  if (t.length === 7) {
-    const p = [true,true,false,false,false,true,true];
-    return p.map((isL, i) => fixChar(t[i], isL)).join('');
-  }
-  // Viejo AAA000 (6 chars)
-  if (t.length === 6) {
-    const p = [true,true,true,false,false,false];
-    return p.map((isL, i) => fixChar(t[i], isL)).join('');
-  }
-  // 5 u 8 chars: intentar igual
-  return t;
-}
-
-// ==== API Key ====
-const DEFAULT_API_KEY = '86f0ff58-358c-4063-99c8-d2c224e14192';
-let apiKey = localStorage.getItem('cochera_api_key') || DEFAULT_API_KEY;
+// ==== API dot ====
 function updateApiDot() {
   const dot = $('api-dot');
   if (apiKey) { dot.classList.remove('off'); dot.title = 'API conectada'; }
@@ -164,14 +147,22 @@ updateApiDot();
 $('cfg-toggle').onclick = () => {
   const p = $('cfg-panel');
   p.style.display = p.style.display === 'none' ? 'flex' : 'none';
-  if (p.style.display === 'flex') { $('apikey-input').value = apiKey; $('apikey-input').focus(); }
+  if (p.style.display === 'flex') {
+    $('server-input').value = serverUrl;
+    $('apikey-input').value = apiKey;
+  }
+};
+$('server-save').onclick = () => {
+  serverUrl = $('server-input').value.trim().replace(/\/$/, '');
+  localStorage.setItem('cochera_server', serverUrl);
+  showToast('Servidor guardado', 'ok');
 };
 $('cfg-save').onclick = () => {
   apiKey = $('apikey-input').value.trim();
   localStorage.setItem('cochera_api_key', apiKey);
   $('cfg-panel').style.display = 'none';
   updateApiDot();
-  showToast(apiKey ? '✓ API Key guardada' : 'API Key borrada', apiKey ? 'ok' : '');
+  showToast(apiKey ? 'API Key guardada' : 'API Key borrada', apiKey ? 'ok' : '');
 };
 
 // ==== Toast ====
@@ -183,7 +174,7 @@ function showToast(msg, type='') {
   toastTimer = setTimeout(() => { t.className = ''; }, 3000);
 }
 
-// ==== API call ====
+// ==== API call (dashboard) ====
 function getFrameB64() {
   try {
     const tmp = document.createElement('canvas');
@@ -210,35 +201,27 @@ async function callAPI(plate) {
 const video=$("video"), canvas=$("canvas"), ctx=canvas.getContext("2d");
 const pre=document.createElement("canvas"); pre.width=INPUT; pre.height=INPUT;
 const pctx=pre.getContext("2d",{willReadFrequently:true});
-const ocrCanvas=document.createElement("canvas");
-const ocrCtx=ocrCanvas.getContext("2d",{willReadFrequently:true});
 
 let session=null, running=false;
-let ocrWorker=null, ocrRunning=false;
+let serverOcrRunning=false;
 let currentPlate='', lastValidPlate='';
 let lastOcrRaw='';
 
 // ==== cochera: persistencia ====
 let records = JSON.parse(localStorage.getItem('cochera_records') || '[]');
-// record: { plate, entry, exit }   exit=null si sigue adentro
 
 function saveRecords() { localStorage.setItem('cochera_records', JSON.stringify(records)); }
-
 function getOpen(plate) { return records.find(r => r.plate===plate && !r.exit); }
 
 async function registerEntry(plate) {
   if (getOpen(plate)) { showToast(`${plate} ya está adentro`, 'err'); return; }
-  // Local primero
   records.unshift({ plate, entry: Date.now(), exit: null });
   saveRecords(); renderHistory(); updateDetectPanel(plate);
-  // API
   if (apiKey) {
     const resp = await callAPI(plate);
     if (resp?.event === 'entry') showToast(`⬆ Entrada: ${plate}`, 'ok');
     else if (resp?.error)        showToast('Error API: ' + resp.error, 'err');
-  } else {
-    showToast(`⬆ Entrada: ${plate} (sin API)`, '');
-  }
+  } else { showToast(`⬆ Entrada: ${plate} (sin API)`, ''); }
 }
 
 async function registerExit(plate) {
@@ -246,45 +229,35 @@ async function registerExit(plate) {
   if (!rec) { showToast(`No hay entrada abierta para ${plate}`, 'err'); return; }
   rec.exit = Date.now();
   saveRecords(); renderHistory(); updateDetectPanel(plate);
-  // API
   if (apiKey) {
     const resp = await callAPI(plate);
     if (resp?.event === 'exit') {
       const dur = resp.duration_secs ? fmtDur(resp.duration_secs * 1000) : '';
       showToast(`⬇ Salida: ${plate}${dur ? ' · ' + dur : ''}`, 'ok');
     } else if (resp?.error) showToast('Error API: ' + resp.error, 'err');
-  } else {
-    showToast(`⬇ Salida: ${plate} (sin API)`, '');
-  }
+  } else { showToast(`⬇ Salida: ${plate} (sin API)`, ''); }
 }
 
-function fmtTime(ts) {
-  return new Date(ts).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
-}
-function fmtDate(ts) {
-  return new Date(ts).toLocaleDateString('es-AR', {day:'2-digit', month:'2-digit'});
-}
+function fmtTime(ts) { return new Date(ts).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}); }
+function fmtDate(ts) { return new Date(ts).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'}); }
 function fmtDur(ms) {
   const h=Math.floor(ms/3600000), m=Math.floor((ms%3600000)/60000);
   return h ? `${h}h ${m}min` : `${m}min`;
 }
 
-// ==== render historial ====
 function renderHistory() {
   const el=$("history");
   if (!records.length) { el.innerHTML='<div class="history-empty">Sin registros aún</div>'; return; }
   el.innerHTML = records.map(r => {
     const dur = r.exit ? fmtDur(r.exit-r.entry) : fmtDur(Date.now()-r.entry);
-    const dateStr = fmtDate(r.entry);
     return `<div class="record ${r.exit?'done':'open'}">
       <div class="plate">${r.plate}</div>
-      <div class="times">${dateStr} · Entrada: ${fmtTime(r.entry)}${r.exit ? ` · Salida: ${fmtTime(r.exit)}` : ' · Aún adentro'}</div>
+      <div class="times">${fmtDate(r.entry)} · Entrada: ${fmtTime(r.entry)}${r.exit ? ` · Salida: ${fmtTime(r.exit)}` : ' · Aún adentro'}</div>
       <div class="dur ${r.exit?'':'open'}">${r.exit ? '⏱ '+dur : '🟡 '+dur+' (en curso)'}</div>
     </div>`;
   }).join('');
 }
 
-// ==== actualiza panel de patente detectada ====
 function updateDetectPanel(plate) {
   const disp=$("plate-display"), status=$("plate-status");
   const btnE=$("btn-entrada"), btnS=$("btn-salida");
@@ -312,33 +285,22 @@ $("btn-clear").onclick=()=>{
   if(confirm('¿Borrar todo el historial?')){ records=[]; saveRecords(); renderHistory(); }
 };
 
-// ==== modelo + OCR ====
+// ==== modelo ====
 async function ensureModel(){
   if(session) return;
   $("hud").textContent='Cargando modelo...';
-  let backend="wasm";
   if(navigator.gpu){
-    try{ session=await ort.InferenceSession.create(MODEL_URL,{executionProviders:["webgpu"]}); backend="webgpu"; }
+    try{ session=await ort.InferenceSession.create(MODEL_URL,{executionProviders:["webgpu"]}); }
     catch(e){}
   }
   if(!session) session=await ort.InferenceSession.create(MODEL_URL,{executionProviders:["wasm"]});
-  return backend;
-}
-async function ensureOCR(){
-  if(ocrWorker) return;
-  $("hud").textContent='Cargando OCR...';
-  ocrWorker=await Tesseract.createWorker('eng');
-  await ocrWorker.setParameters({ tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', tessedit_pageseg_mode:'8' });
 }
 
-$("startbtn").onclick=async()=>{
-  if(running){ stop(); return; }
-  await start();
-};
+$("startbtn").onclick=async()=>{ if(running){ stop(); return; } await start(); };
 
 async function start(){
   try{
-    const [backend]=await Promise.all([ensureModel(), ensureOCR()]);
+    await ensureModel();
     const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}},audio:false});
     video.srcObject=stream; await video.play();
     canvas.width=video.videoWidth; canvas.height=video.videoHeight;
@@ -352,12 +314,11 @@ function stop(){
   if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
 }
 
-// ==== wake lock ====
 let wakeLock=null;
 async function acquireWakeLock(){ try{ if("wakeLock" in navigator) wakeLock=await navigator.wakeLock.request("screen"); }catch(e){} }
 document.addEventListener("visibilitychange",()=>{ if(running&&wakeLock&&document.visibilityState==="visible") acquireWakeLock(); });
 
-// ==== preprocess deteccion ====
+// ==== preprocess ====
 function preprocess(){
   const vw=video.videoWidth,vh=video.videoHeight,r=Math.min(INPUT/vw,INPUT/vh);
   const nw=Math.round(vw*r),nh=Math.round(vh*r);
@@ -373,7 +334,7 @@ function iou(a,b){ const x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),x2=Math.m
 function nms(boxes,scores,thr){ const idx=scores.map((s,i)=>i).sort((a,b)=>scores[b]-scores[a]),keep=[];
   while(idx.length){ const c=idx.shift(); keep.push(c); for(let k=idx.length-1;k>=0;k--) if(iou(boxes[c],boxes[idx[k]])>thr) idx.splice(k,1); } return keep; }
 
-// ==== postprocess YOLOv8 (output: [1, 4+cls, anchors]) ====
+// ==== postprocess YOLOv8 [1, 4+cls, anchors] ====
 function postprocess(out,r){
   const d=out.data,dims=out.dims,nC=dims[1]-4,nA=dims[2];
   const boxes=[],scores=[],cls=[];
@@ -392,69 +353,7 @@ function postprocess(out,r){
   return res;
 }
 
-// ==== OCR: preprocesamiento ====
-
-// Dibuja el recorte upscaleado en ocrCanvas.
-// Saltea el 35% superior (encabezado "REPÚBLICA ARGENTINA") y toma solo la zona del número.
-function drawCrop(box){
-  const [x1,y1,x2,y2]=box.map(Math.round);
-  const w=Math.max(x2-x1,1),h=Math.max(y2-y1,1);
-  const yNum=Math.round(y1+h*0.35);   // inicio de la zona del número
-  const hNum=Math.max(y2-yNum,1);     // alto de esa zona
-  const scale=Math.max(5,Math.round(80/hNum)), pad=16;
-  ocrCanvas.width=w*scale+pad*2; ocrCanvas.height=hNum*scale+pad*2;
-  ocrCtx.fillStyle='gray'; ocrCtx.fillRect(0,0,ocrCanvas.width,ocrCanvas.height);
-  ocrCtx.drawImage(video,x1,yNum,w,hNum,pad,pad,w*scale,hNum*scale);
-}
-
-// Convierte a escala de grises in-place
-function toGray(d){
-  for(let i=0;i<d.length;i+=4){
-    const g=Math.round(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]);
-    d[i]=d[i+1]=d[i+2]=g;
-  }
-}
-
-// Estira el histograma al rango 0-255
-function normalize(d){
-  let mn=255,mx=0;
-  for(let i=0;i<d.length;i+=4){ if(d[i]<mn)mn=d[i]; if(d[i]>mx)mx=d[i]; }
-  const r=Math.max(mx-mn,1);
-  for(let i=0;i<d.length;i+=4){ const v=Math.round((d[i]-mn)/r*255); d[i]=d[i+1]=d[i+2]=v; }
-}
-
-// Invierte la imagen (para patente negra con texto blanco)
-function invert(d){
-  for(let i=0;i<d.length;i+=4){ d[i]=255-d[i]; d[i+1]=255-d[i+1]; d[i+2]=255-d[i+2]; }
-}
-
-// CLAHE simplificado: ecualización de histograma por tiles (contraste local adaptativo)
-function clahe(d,w,h,tileSize=32){
-  const tx=Math.ceil(w/tileSize),ty=Math.ceil(h/tileSize);
-  for(let row=0;row<ty;row++) for(let col=0;col<tx;col++){
-    const x0=col*tileSize,y0=row*tileSize,x1=Math.min(x0+tileSize,w),y1=Math.min(y0+tileSize,h);
-    const hist=new Uint32Array(256),n=(x1-x0)*(y1-y0);
-    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++) hist[d[(y*w+x)*4]]++;
-    const lut=new Uint8Array(256); let cum=0;
-    for(let i=0;i<256;i++){cum+=hist[i];lut[i]=Math.min(255,Math.round(cum/n*255));}
-    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
-      const idx=(y*w+x)*4; d[idx]=d[idx+1]=d[idx+2]=lut[d[idx]];
-    }
-  }
-}
-
-// Aplica una variante de preprocesamiento al ocrCanvas actual
-function applyVariant(variant){
-  const img=ocrCtx.getImageData(0,0,ocrCanvas.width,ocrCanvas.height),d=img.data;
-  toGray(d);
-  if(variant==='norm')         { normalize(d); }
-  if(variant==='norm-inv')     { normalize(d); invert(d); }
-  if(variant==='clahe')        { clahe(d,ocrCanvas.width,ocrCanvas.height); }
-  if(variant==='clahe-inv')    { clahe(d,ocrCanvas.width,ocrCanvas.height); invert(d); }
-  ocrCtx.putImageData(img,0,0);
-}
-
-// ==== votacion ====
+// ==== voting ====
 const ocrVotes=[];
 const VOTE_WIN=4, VOTE_THR=2;
 
@@ -468,31 +367,36 @@ function voteForPlate(plate){
   return bestN>=VOTE_THR ? best : '';
 }
 
-// ==== tryOCR: prueba hasta 4 variantes, para en la primera que matchea ====
-const VARIANTS=['norm','norm-inv','clahe','clahe-inv'];
-
-async function tryOCR(dets){
-  if(!ocrWorker||ocrRunning||!dets.length) return;
-  ocrRunning=true;
+// ==== Server OCR ====
+async function tryServerOCR(dets){
+  if(serverOcrRunning||!dets.length||!serverUrl) return;
+  serverOcrRunning=true;
   try{
-    let found='';
-    for(const variant of VARIANTS){
-      drawCrop(dets[0].box);
-      applyVariant(variant);
-      const {data:{text}}=await ocrWorker.recognize(ocrCanvas);
-      // Guarda raw para debug en HUD
-      const raw=text.replace(/[^A-Z0-9]/g,'').toUpperCase();
-      if(raw) lastOcrRaw=raw;
-      found=extractPlate(text);
-      if(found) break;
-    }
-    const confirmed=voteForPlate(found);
-    if(confirmed && confirmed!==currentPlate){
+    const [x1,y1,x2,y2]=dets[0].box.map(Math.round);
+    const w=Math.max(x2-x1,1), h=Math.max(y2-y1,1);
+    const yNum=Math.round(y1+h*0.35);
+    const hNum=Math.max(y2-yNum,1);
+    const scale=Math.max(4,Math.round(120/hNum));
+    const tmp=document.createElement('canvas');
+    tmp.width=w*scale; tmp.height=hNum*scale;
+    tmp.getContext('2d').drawImage(video,x1,yNum,w,hNum,0,0,w*scale,hNum*scale);
+    const b64=tmp.toDataURL('image/jpeg',0.9);
+
+    const res=await fetch(serverUrl+'/ocr',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({image:b64}),
+      signal:AbortSignal.timeout(4000)
+    });
+    const data=await res.json();
+    if(data.raw) lastOcrRaw=data.raw;
+    const confirmed=voteForPlate(data.plate||'');
+    if(confirmed&&confirmed!==currentPlate){
       currentPlate=confirmed; lastValidPlate=confirmed;
       updateDetectPanel(confirmed);
     }
   }catch(e){}
-  ocrRunning=false;
+  serverOcrRunning=false;
 }
 
 // ==== draw ====
@@ -513,7 +417,7 @@ function drawFrame(dets){
 }
 
 // ==== loop ====
-let frames=0,lastT=performance.now(),backend='';
+let frames=0,lastT=performance.now();
 async function loop(){
   if(!running) return;
   const {tensor,r}=preprocess();
@@ -521,11 +425,11 @@ async function loop(){
   const out=await session.run({[session.inputNames[0]]:tensor});
   const inf=(performance.now()-t0).toFixed(0);
   const dets=postprocess(out[session.outputNames[0]],r);
-  drawFrame(dets); tryOCR(dets);
+  drawFrame(dets); tryServerOCR(dets);
   frames++; const now=performance.now();
   if(now-lastT>=500){
     const fps=(frames*1000/(now-lastT)).toFixed(1);
-    $("hud").textContent=`${fps} FPS · ${inf}ms · ${dets.length} det.${lastOcrRaw?' | raw:'+lastOcrRaw:''}`;
+    $("hud").textContent=`${fps} FPS · ${inf}ms · ${dets.length} det.${lastOcrRaw?' | ocr:'+lastOcrRaw:''}`;
     frames=0; lastT=now;
   }
   requestAnimationFrame(loop);
