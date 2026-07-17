@@ -431,6 +431,7 @@ function voteForPlate(plate){
 // ==== Server OCR ====
 async function tryServerOCR(dets){
   if(serverOcrRunning||!dets.length||!serverUrl) return;
+  if(currentPlate) return; // ya confirmada, no volver a llamar hasta que desaparezca
   serverOcrRunning=true;
   try{
     const [x1,y1,x2,y2]=dets[0].box.map(Math.round);
