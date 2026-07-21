@@ -99,25 +99,6 @@ h1 { font-size:1.1rem; } h1 span { color:#4fc3f7; }
     <input id="apikey-input" type="password" placeholder="API Key del dashboard" />
     <button id="cfg-save">OK</button>
   </div>
-  <div class="cfg-row">
-    <label>OpenRouter</label>
-    <input id="or-key-input" type="password" placeholder="sk-or-v1-..." />
-    <button id="or-key-save">OK</button>
-  </div>
-  <div class="cfg-row">
-    <label>Modelo LLM</label>
-    <select id="or-model-select" style="flex:1;background:#1f2937;border:1px solid #374151;border-radius:8px;padding:7px 10px;color:#e5e7eb;font-size:.8rem;">
-      <option value="">— EasyOCR (local) —</option>
-      <option value="google/gemini-3.1-flash-image">Gemini 3.1 Flash Image</option>
-      <option value="google/gemini-3.1-flash-lite-image">Gemini 3.1 Flash Lite Image (barato)</option>
-      <option value="google/gemini-3.5-flash">Gemini 3.5 Flash</option>
-      <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5</option>
-      <option value="openai/gpt-4o-mini">GPT-4o mini</option>
-      <option value="meta-llama/llama-3.2-11b-vision-instruct">Llama 3.2 11B Vision (gratis)</option>
-      <option value="moonshotai/moonshot-v1-8k">Moonshot 8K</option>
-    </select>
-    <button id="or-model-save">OK</button>
-  </div>
 </div>
 <div id="toast"></div>
 
@@ -160,18 +141,7 @@ if (_savedServer && OLD_TUNNELS.some(t => _savedServer.includes(t))) {
   localStorage.removeItem('cochera_server');
 }
 let serverUrl = _savedServer || DEFAULT_SERVER;
-
-// Si el modelo guardado es uno que ya no existe en OpenRouter, usar el default
-const OLD_MODELS = ['google/gemini-flash-1.5-8b', 'google/gemini-2.0-flash-001'];
-let _savedModel = localStorage.getItem('cochera_or_model');
-if (_savedModel && OLD_MODELS.includes(_savedModel)) {
-  _savedModel = null;
-  localStorage.removeItem('cochera_or_model');
-}
-
 let apiKey = localStorage.getItem('cochera_api_key') || '86f0ff58-358c-4063-99c8-d2c224e14192';
-let orKey = localStorage.getItem('cochera_or_key') || '';
-let orModel = _savedModel || 'google/gemini-3.1-flash-image';
 
 // ==== API dot ====
 function updateApiDot() {
@@ -187,8 +157,6 @@ $('cfg-toggle').onclick = () => {
   if (p.style.display === 'flex') {
     $('server-input').value = serverUrl;
     $('apikey-input').value = apiKey;
-    $('or-key-input').value = orKey;
-    $('or-model-select').value = orModel;
   }
 };
 $('server-save').onclick = () => {
@@ -202,16 +170,6 @@ $('cfg-save').onclick = () => {
   $('cfg-panel').style.display = 'none';
   updateApiDot();
   showToast(apiKey ? 'API Key guardada' : 'API Key borrada', apiKey ? 'ok' : '');
-};
-$('or-key-save').onclick = () => {
-  orKey = $('or-key-input').value.trim();
-  localStorage.setItem('cochera_or_key', orKey);
-  showToast(orKey ? 'OpenRouter key guardada' : 'Key borrada', orKey ? 'ok' : '');
-};
-$('or-model-save').onclick = () => {
-  orModel = $('or-model-select').value;
-  localStorage.setItem('cochera_or_model', orModel);
-  showToast(orModel ? `Modelo: ${orModel.split('/')[1]}` : 'Usando EasyOCR local', 'ok');
 };
 
 // ==== Toast ====
@@ -450,10 +408,8 @@ async function tryServerOCR(dets){
     tc.drawImage(video,sx,sy,sw,sh,0,0,sw*scale,sh*scale);
     const b64=tmp.toDataURL('image/png');
 
-    const useLLM = !!orModel;
-    const endpoint = useLLM ? serverUrl+'/ocr-llm' : serverUrl+'/ocr';
-    // La key vive en el servidor, el browser solo manda el modelo
-    const body = useLLM ? {image:b64, model:orModel} : {image:b64};
+    const endpoint = serverUrl+'/ocr';
+    const body = {image:b64};
     const res=await fetch(endpoint,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -505,8 +461,7 @@ async function loop(){
   frames++; const now=performance.now();
   if(now-lastT>=500){
     const fps=(frames*1000/(now-lastT)).toFixed(1);
-    const ocrMode = orModel&&orKey ? orModel.split('/')[1] : 'easyocr';
-    $("hud").textContent=`${fps} FPS · ${inf}ms · ${dets.length} det. [${ocrMode}]${lastOcrRaw?' | '+lastOcrRaw:''}`;
+    $("hud").textContent=`${fps} FPS · ${inf}ms · ${dets.length} det. [easyocr]${lastOcrRaw?' | '+lastOcrRaw:''}`;
     frames=0; lastT=now;
   }
   requestAnimationFrame(loop);
